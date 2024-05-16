@@ -17,6 +17,8 @@ import os
 import torch
 import torchaudio
 import torchaudio.compliance.kaldi as kaldi
+from pydub.audio_segment import AudioSegment
+from typing import Union
 
 from wenet.cli.hub import Hub
 from wenet.utils.ctc_utils import (force_align, gen_ctc_peak_time,
@@ -57,12 +59,19 @@ class Model:
         else:
             self.context_graph = None
 
-    def compute_feats(self, audio_file: str) -> torch.Tensor:
-        waveform, sample_rate = torchaudio.load(audio_file, normalize=False)
-        waveform = waveform.to(torch.float)
-        if sample_rate != self.resample_rate:
-            waveform = torchaudio.transforms.Resample(
-                orig_freq=sample_rate, new_freq=self.resample_rate)(waveform)
+    def compute_feats(self, audio_file: Union[str, AudioSegment]) -> torch.Tensor:
+        if isinstance(audio_file, str):
+            # 读取本地音频文件
+            waveform, sample_rate = torchaudio.load(audio_file, normalize=False)
+
+            waveform = waveform.to(torch.float)
+            if sample_rate != self.resample_rate:
+                waveform = torchaudio.transforms.Resample(
+                    orig_freq=sample_rate, new_freq=self.resample_rate)(waveform)
+        else:
+            # pydub库读取的音频文件
+            audio = audio_file.get_array_of_samples()
+            waveform = torch.unsqueeze(torch.Tensor(audio), 0)
         waveform = waveform.to(self.device)
         feats = kaldi.fbank(waveform,
                             num_mel_bins=80,
@@ -75,7 +84,7 @@ class Model:
 
     @torch.no_grad()
     def _decode(self,
-                audio_file: str,
+                audio_file: Union[str, AudioSegment],
                 tokens_info: bool = False,
                 label: str = None) -> dict:
         feats = self.compute_feats(audio_file)
@@ -128,7 +137,7 @@ class Model:
             result['tokens'] = tokens_info
         return result
 
-    def transcribe(self, audio_file: str, tokens_info: bool = False) -> dict:
+    def transcribe(self, audio_file: Union[str, AudioSegment], tokens_info: bool = False) -> dict:
         return self._decode(audio_file, tokens_info)
 
     def tokenize(self, label: str):
@@ -146,7 +155,7 @@ class Model:
                 token_list.append(self.symbol_table['<unk>'])
         return token_list
 
-    def align(self, audio_file: str, label: str) -> dict:
+    def align(self, audio_file: Union[str, AudioSegment], label: str) -> dict:
         return self._decode(audio_file, True, label)
 
 
